@@ -1,0 +1,54 @@
+# Python bytecode and tool caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments and packaging output
+.venv/
+venv/
+env/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# Local credentials and environment overrides
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*credentials*
+*secrets*
+config/local*.yaml
+config/local*.json
+
+# Runtime data, logs and local databases
+*.log
+*.jsonl
+*.sqlite
+*.sqlite3
+*.db
+storage/raw/
+data/
+
+# Editors and operating-system files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Codex/ChatGPT local project metadata and synced references
+.codex/
+.agents/
+AGENTS.md
+sources/

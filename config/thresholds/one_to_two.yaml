@@ -1,0 +1,26 @@
+{
+  "thresholds": {
+    "weight_expectation": {"value": 20, "status": "SEED", "description": "AQS expectation component weight"},
+    "weight_authenticity": {"value": 25, "status": "SEED", "description": "AQS authenticity component weight"},
+    "weight_relative_strength": {"value": 20, "status": "SEED", "description": "AQS relative strength component weight"},
+    "weight_liquidity": {"value": 20, "status": "SEED", "description": "AQS liquidity component weight"},
+    "weight_context": {"value": 15, "status": "SEED", "description": "AQS context component weight"},
+    "aqs_a1_min": {"value": 82, "status": "SEED"},
+    "aqs_a2_min": {"value": 74, "status": "SEED"},
+    "hvs_a_min": {"value": 70, "status": "SEED"},
+    "aqs_b_min": {"value": 60, "status": "SEED"},
+    "pre20_mirage_decay_pct": {"value": 2.0, "status": "SEED"},
+    "post20_decay_pct": {"value": 1.2, "status": "SEED"},
+    "price_strength_gap_pct": {"value": 3.0, "status": "SEED"},
+    "liquidity_low_percentile": {"value": 0.25, "status": "SEED"},
+    "isolated_strength_rank_pct": {"value": 0.25, "status": "SEED"},
+    "last_second_spike_pct": {"value": 1.0, "status": "SEED"},
+    "healthy_recovery_ratio": {"value": 0.65, "status": "SEED"},
+    "healthy_min_drawdown_pct": {"value": 0.4, "status": "SEED"},
+    "continuous_decay_fraction": {"value": 0.75, "status": "SEED"},
+    "score_authentic": {"value": 100, "status": "SEED"},
+    "score_healthy_disagreement": {"value": 90, "status": "SEED"},
+    "score_suspicious": {"value": 40, "status": "SEED"},
+    "score_fake_strong": {"value": 0, "status": "SEED"}
+  }
+}

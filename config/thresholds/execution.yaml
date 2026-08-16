@@ -1,0 +1,12 @@
+{
+  "thresholds": {
+    "max_receive_lag_seconds": {"value": 5, "status": "SEED"},
+    "max_tick_age_seconds": {"value": 5, "status": "SEED"},
+    "dqs_degraded_completeness": {"value": 0.75, "status": "SEED"},
+    "dqs_broken_completeness": {"value": 0.50, "status": "SEED"},
+    "compiler_aqs_min": {"value": 74, "status": "SEED"},
+    "compiler_hvs_min": {"value": 70, "status": "SEED"},
+    "compiler_percentile_min": {"value": 0.70, "status": "SEED"},
+    "compiler_rank_max": {"value": 3, "status": "SEED"}
+  }
+}

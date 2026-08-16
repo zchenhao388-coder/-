@@ -1,0 +1,7 @@
+{
+  "active": "mock",
+  "sources": {
+    "mock": {"adapter": "adapters.mock.MockAdapter"},
+    "eastmoney_snapshot": {"adapter": "adapters.eastmoney.EastmoneySnapshotAdapter", "experimental": true}
+  }
+}
