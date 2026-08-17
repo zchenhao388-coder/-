@@ -1,0 +1,10 @@
+{
+  "thresholds": {
+    "clean_success_return_min_pct": {"value": 5.0, "status": "SEED"},
+    "clean_success_mae_max_pct": {"value": 2.0, "status": "SEED"},
+    "good_non_limit_return_min_pct": {"value": 2.0, "status": "SEED"},
+    "flat_no_edge_abs_return_max_pct": {"value": 1.0, "status": "SEED"},
+    "fast_failure_return_5m_max_pct": {"value": -2.0, "status": "SEED"},
+    "nuclear_open_gap_max_pct": {"value": -7.0, "status": "SEED"}
+  }
+}

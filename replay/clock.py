@@ -62,7 +62,12 @@ class ReplayEngine:
     ) -> Iterator[AuctionTick]:
         checkpoint_target = None
         if mode == ReplayMode.CHECKPOINT:
-            eligible = sorted(checkpoint for checkpoint in checkpoints if checkpoint >= self.clock.now)
+            next_timestamp = self._ticks[self._cursor].exchange_ts if self._cursor < len(self._ticks) else None
+            eligible = sorted(
+                checkpoint for checkpoint in checkpoints
+                if checkpoint > self.clock.now
+                or (checkpoint == self.clock.now and next_timestamp is not None and next_timestamp <= checkpoint)
+            )
             if not eligible:
                 return
             checkpoint_target = eligible[0]
@@ -89,3 +94,14 @@ class ReplayEngine:
                 if next_ts is None or next_ts > checkpoint_target:
                     self.clock.advance_to(checkpoint_target)
                     return
+
+    def market_view(self, trade_date: str, **point_in_time_data):
+        """Build a strategy-facing view without exposing the replay's full tick store."""
+        from market.asof import AsOfMarketView
+
+        return AsOfMarketView(
+            trade_date=trade_date,
+            as_of=self.clock.now,
+            ticks=self._ticks,
+            **point_in_time_data,
+        )

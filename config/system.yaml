@@ -2,5 +2,7 @@
   "schema_version": "0.1",
   "timezone": "Asia/Shanghai",
   "decision_time": "09:25:00",
-  "authenticity_start": "09:20:00"
+  "authenticity_start": "09:20:00",
+  "shadow_mode": true,
+  "auto_order": false
 }

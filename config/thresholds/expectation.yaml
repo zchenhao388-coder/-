@@ -1,0 +1,7 @@
+{
+  "thresholds": {
+    "prior_strength": {"value": 10, "status": "SEED", "description": "Hierarchical shrinkage prior strength; calibration required"},
+    "minimum_local_sample_size": {"value": 5, "status": "SEED", "description": "Minimum local sample before parent fallback; calibration required"},
+    "insufficient_sample_confidence_multiplier": {"value": 0.5, "status": "SEED", "description": "Confidence penalty when no hierarchy level reaches minimum sample"}
+  }
+}

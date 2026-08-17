@@ -1,0 +1,12 @@
+{
+  "thresholds": {
+    "source_price_degraded_pct": {"value": 0.2, "status": "SEED"},
+    "source_price_broken_pct": {"value": 1.0, "status": "SEED"},
+    "source_gap_degraded_points": {"value": 0.3, "status": "SEED"},
+    "source_gap_broken_points": {"value": 1.0, "status": "SEED"},
+    "source_skew_degraded_seconds": {"value": 3, "status": "SEED"},
+    "source_skew_broken_seconds": {"value": 10, "status": "SEED"},
+    "source_provider_skew_degraded_seconds": {"value": 3, "status": "SEED"},
+    "source_provider_skew_broken_seconds": {"value": 10, "status": "SEED"}
+  }
+}

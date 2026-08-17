@@ -1,3 +1,3 @@
-from .jsonl import RawTickJsonlStore
+from .jsonl import RawPayloadJsonlStore, RawTickJsonlStore
 
-__all__ = ["RawTickJsonlStore"]
+__all__ = ["RawPayloadJsonlStore", "RawTickJsonlStore"]

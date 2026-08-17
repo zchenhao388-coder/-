@@ -15,6 +15,11 @@ class DataCapability:
     timestamp_semantics: str = "UNKNOWN"
     auction_semantics_verified: bool = False
     notes: Sequence[str] = field(default_factory=tuple)
+    allowed_uses: Sequence[str] = field(default_factory=tuple)
+    execution_enabled: bool = False
+    license_verified: bool = False
+    sla_verified: bool = False
+    semantic_evidence_version: Optional[str] = None
 
     @property
     def supports_core(self) -> bool:
@@ -25,6 +30,36 @@ class BaseAdapter(ABC):
     @property
     @abstractmethod
     def capability(self) -> DataCapability:
+        raise NotImplementedError
+
+
+class RealtimeAdapter(BaseAdapter):
+    @abstractmethod
+    def connect(self) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def subscribe(self, tickers: Sequence[str]) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def unsubscribe(self, tickers: Sequence[str]) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_latest(self, ticker: str) -> Optional[AuctionTick]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def stream(self) -> Iterable[AuctionTick]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def health(self) -> Mapping[str, object]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def close(self) -> None:
         raise NotImplementedError
 
     @abstractmethod

@@ -1,7 +1,7 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Mapping, Union
+from typing import Dict, Iterable, Mapping, Optional, Tuple, Union
 
 from domain.enums import ThresholdStatus
 
@@ -12,6 +12,10 @@ class Threshold:
     value: float
     status: ThresholdStatus
     description: str = ""
+    sample_size: Optional[int] = None
+    regime_scope: str = "ALL"
+    last_calibrated_at: Optional[str] = None
+    notes: str = ""
 
 
 class ThresholdRegistry:
@@ -29,6 +33,10 @@ class ThresholdRegistry:
                 value=float(item["value"]),
                 status=ThresholdStatus(item["status"]),
                 description=item.get("description", ""),
+                sample_size=item.get("sample_size"),
+                regime_scope=item.get("regime_scope", "ALL"),
+                last_calibrated_at=item.get("last_calibrated_at"),
+                notes=item.get("notes", ""),
             )
         return cls(values)
 
@@ -45,3 +53,9 @@ class ThresholdRegistry:
         missing = sorted(set(keys) - set(self._values))
         if missing:
             raise KeyError(f"missing thresholds: {missing}")
+
+    def items(self) -> Tuple[Tuple[str, Threshold], ...]:
+        return tuple(sorted(self._values.items()))
+
+    def as_mapping(self) -> Mapping[str, Threshold]:
+        return dict(self._values)

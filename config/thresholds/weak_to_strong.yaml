@@ -1,1 +1,32 @@
-{"thresholds": {}}
+{
+  "thresholds": {
+    "weight_repair_surprise": {"value": 30, "status": "SEED"},
+    "weight_authenticity": {"value": 25, "status": "SEED"},
+    "weight_identity_relative": {"value": 20, "status": "SEED"},
+    "weight_liquidity": {"value": 15, "status": "SEED"},
+    "weight_context": {"value": 10, "status": "SEED"},
+    "aqs_a1_min": {"value": 82, "status": "SEED"},
+    "aqs_a2_min": {"value": 74, "status": "SEED"},
+    "aqs_b_min": {"value": 60, "status": "SEED"},
+    "hvs_a_min": {"value": 70, "status": "SEED"},
+    "repair_surprise_percentile_min": {"value": 0.7, "status": "SEED"},
+    "repair_normalized_eg_min": {"value": 0.5, "status": "SEED"},
+    "repair_post20_delta_min": {"value": 0.0, "status": "SEED"},
+    "repair_fade_delta_max": {"value": -1.0, "status": "SEED"},
+    "open_only_gap_min": {"value": 1.0, "status": "SEED"},
+    "identity_theme_rank_min": {"value": 0.7, "status": "SEED"},
+    "identity_direct_rank_min": {"value": 0.6, "status": "SEED"},
+    "identity_rank_improvement_min": {"value": 0.1, "status": "SEED"},
+    "liquidity_confirmation_score_min": {"value": 50, "status": "SEED", "description": "0-100 liquidity score"},
+    "score_authentic": {"value": 100, "status": "SEED"},
+    "score_healthy_disagreement": {"value": 90, "status": "SEED"},
+    "score_suspicious": {"value": 40, "status": "SEED"},
+    "score_fake_strong": {"value": 0, "status": "SEED"},
+    "score_weakness_resolved": {"value": 100, "status": "SEED"},
+    "score_weakness_partial": {"value": 60, "status": "SEED"},
+    "score_weakness_false": {"value": 0, "status": "SEED"},
+    "score_identity_recovered": {"value": 100, "status": "SEED"},
+    "score_identity_partial": {"value": 60, "status": "SEED"},
+    "score_identity_false": {"value": 0, "status": "SEED"}
+  }
+}

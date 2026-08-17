@@ -1,9 +1,9 @@
 from datetime import datetime
-from typing import Sequence
+from typing import Optional, Sequence
 
 from config.thresholds import ThresholdRegistry
 from domain.enums import DataQualityState
-from domain.models import AuctionTick, DataQualityReport
+from domain.models import AuctionTick, DataQualityReport, SourceValidationReport
 
 
 class DataQualityService:
@@ -19,13 +19,20 @@ class DataQualityService:
     def __init__(self, thresholds: ThresholdRegistry):
         self.thresholds = thresholds
 
-    def evaluate(self, ticks: Sequence[AuctionTick], as_of: datetime) -> DataQualityReport:
+    def evaluate(
+        self,
+        ticks: Sequence[AuctionTick],
+        as_of: datetime,
+        source_validation: Optional[SourceValidationReport] = None,
+    ) -> DataQualityReport:
         if not ticks:
             return DataQualityReport(DataQualityState.BROKEN, self.CORE_FIELDS, ("NO_TICKS",), 0.0)
         latest = max(ticks, key=lambda tick: float("-inf") if tick.exchange_ts is None else tick.exchange_ts.timestamp())
         missing = tuple(name for name in self.CORE_FIELDS if getattr(latest, name) is None)
         completeness = (len(self.CORE_FIELDS) - len(missing)) / len(self.CORE_FIELDS)
         reasons = []
+        if latest.exchange_ts is None:
+            reasons.append("MISSING_RELIABLE_EXCHANGE_TS")
         if latest.exchange_ts is not None and latest.exchange_ts > as_of:
             reasons.append("FUTURE_TICK")
         elif latest.exchange_ts is not None:
@@ -49,4 +56,10 @@ class DataQualityService:
             state = DataQualityState.DEGRADED
         else:
             state = DataQualityState.GOOD
+        if source_validation is not None:
+            reasons.extend(code for code in source_validation.reason_codes if code not in reasons)
+            if source_validation.dqs_state == DataQualityState.BROKEN:
+                state = DataQualityState.BROKEN
+            elif source_validation.dqs_state == DataQualityState.DEGRADED and state == DataQualityState.GOOD:
+                state = DataQualityState.DEGRADED
         return DataQualityReport(state, missing, tuple(reasons), completeness)

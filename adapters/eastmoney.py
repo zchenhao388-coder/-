@@ -35,7 +35,7 @@ class EastmoneySnapshotAdapter(BaseAdapter):
         return DataCapability(
             adapter_name="eastmoney_snapshot_experimental",
             core_fields={
-                "exchange_ts": True,
+                "exchange_ts": False,
                 "receive_ts": True,
                 "ticker": True,
                 "virtual_price": True,
@@ -51,7 +51,8 @@ class EastmoneySnapshotAdapter(BaseAdapter):
                 "orderbook": False,
             },
             field_provenance={
-                "exchange_ts": "f86 provider quote timestamp",
+                "exchange_ts": "N/A; no verified exchange-origin timestamp",
+                "provider_ts": "f86 provider quote timestamp",
                 "receive_ts": "local UTC receive clock",
                 "virtual_price": "f43; interpretation is phase-dependent",
                 "gap_pct": "derived from f43 and f60",
@@ -66,6 +67,7 @@ class EastmoneySnapshotAdapter(BaseAdapter):
                 "09:15-09:25 virtual-price and virtual-match semantics require a trading-day capture.",
                 "Do not enable production execution from this adapter.",
             ),
+            allowed_uses=("FIELD_PROBE", "RAW_CAPTURE", "SHADOW_RESEARCH"),
         )
 
     def load(
@@ -104,17 +106,18 @@ class EastmoneySnapshotAdapter(BaseAdapter):
             gap_pct = (price / previous_close - 1.0) * 100.0
         raw_volume = self._number(data.get("f47"))
         exchange_epoch = self._number(data.get("f86"))
-        exchange_ts = None
+        provider_ts = None
         if exchange_epoch not in (None, 0):
-            exchange_ts = datetime.fromtimestamp(exchange_epoch, tz=ZoneInfo("Asia/Shanghai"))
+            provider_ts = datetime.fromtimestamp(exchange_epoch, tz=ZoneInfo("Asia/Shanghai"))
         return AuctionTick(
-            exchange_ts=exchange_ts,
+            exchange_ts=None,
             receive_ts=receive_ts,
             ticker=canonical,
             virtual_price=price,
             gap_pct=gap_pct,
             matched_volume=None if raw_volume is None else raw_volume * 100.0,
             matched_amount=self._number(data.get("f48")),
+            provider_ts=provider_ts,
             source=self.capability.adapter_name,
             raw=dict(data),
         )

@@ -7,6 +7,12 @@
     "compiler_aqs_min": {"value": 74, "status": "SEED"},
     "compiler_hvs_min": {"value": 70, "status": "SEED"},
     "compiler_percentile_min": {"value": 0.70, "status": "SEED"},
-    "compiler_rank_max": {"value": 3, "status": "SEED"}
+    "compiler_rank_max": {"value": 3, "status": "SEED"},
+    "open_hold_return_min_pct": {"value": -0.8, "status": "SEED"},
+    "open_confirm_return_min_pct": {"value": 0.0, "status": "SEED"},
+    "open_dump_return_max_pct": {"value": -2.5, "status": "SEED"},
+    "open_extension_max_pct": {"value": 3.0, "status": "SEED"},
+    "open_active_amount_min": {"value": 1, "status": "SEED"},
+    "open_recovery_min": {"value": 0.5, "status": "SEED"}
   }
 }

@@ -1,0 +1,9 @@
+{
+  "thresholds": {
+    "feed_degraded_latency_seconds": {"value": 3, "status": "SEED"},
+    "feed_broken_latency_seconds": {"value": 8, "status": "SEED"},
+    "feed_degraded_missing_fraction": {"value": 0.1, "status": "SEED"},
+    "feed_broken_missing_fraction": {"value": 0.3, "status": "SEED"},
+    "breaker_recovery_good_samples": {"value": 3, "status": "SEED"}
+  }
+}

@@ -3,21 +3,36 @@ from datetime import datetime, time, timedelta
 from statistics import median
 from typing import Dict, Mapping, Optional, Protocol, Sequence, Tuple
 
+from auction.phase import auction_phase_at
 from config.thresholds import ThresholdRegistry
-from domain.enums import AuthenticityState, FakeStrongFlag
+from domain.enums import AuctionPhase, AuthenticityState, BenchmarkStatus, FakeStrongFlag
 from domain.models import AuctionTick
+from expectation.benchmark import BenchmarkKey, PointInTimeExpectedAuction
+from expectation.surprise import AuctionSurpriseResult
+from market.asof import AsOfMarketView
 
 
 class AuctionSurprisePercentile(Protocol):
-    def percentile(self, ticker: str, normalized_eg: float, as_of: datetime) -> Optional[float]:
+    def percentile(
+        self,
+        market_view: AsOfMarketView,
+        benchmark_key: BenchmarkKey,
+        actual_gap: float,
+        information_available_at: datetime,
+    ) -> AuctionSurpriseResult:
         ...
 
 
 @dataclass(frozen=True)
 class FeatureSnapshot:
+    ticker: str
+    trade_date: str
+    computed_as_of: datetime
     values: Mapping[str, Optional[float]]
     fake_strong_flags: Sequence[FakeStrongFlag]
     authenticity_state: AuthenticityState
+    benchmark_status: BenchmarkStatus
+    surprise_status: BenchmarkStatus
 
 
 def _percentile_rank(value: Optional[float], population: Sequence[float]) -> Optional[float]:
@@ -27,7 +42,7 @@ def _percentile_rank(value: Optional[float], population: Sequence[float]) -> Opt
 
 
 def _value_at_or_before(ticks: Sequence[AuctionTick], target: time) -> Optional[AuctionTick]:
-    eligible = [t for t in ticks if t.exchange_ts is not None and t.exchange_ts.time() <= target]
+    eligible = [tick for tick in ticks if tick.exchange_ts is not None and tick.exchange_ts.time() <= target]
     return eligible[-1] if eligible else None
 
 
@@ -38,45 +53,63 @@ class AuctionFeatureEngine:
 
     def compute(
         self,
+        market_view: AsOfMarketView,
         ticker: str,
-        ticks: Sequence[AuctionTick],
-        expected_gap_q50: Optional[float],
-        expected_gap_q25: Optional[float],
-        expected_gap_q75: Optional[float],
-        historical_amounts: Sequence[float] = (),
-        historical_volumes: Sequence[float] = (),
-        peer_amounts: Sequence[float] = (),
-        peer_volumes: Sequence[float] = (),
-        theme_peer_gaps: Sequence[float] = (),
-        global_peer_gaps: Sequence[float] = (),
-        height_peer_gaps: Sequence[float] = (),
+        expectation: PointInTimeExpectedAuction,
+        liquidity_peer_group: Optional[str] = None,
+        theme_peer_group: Optional[str] = None,
+        global_peer_group: Optional[str] = None,
+        height_peer_group: Optional[str] = None,
         theme_validated: bool = True,
     ) -> FeatureSnapshot:
-        ordered = tuple(sorted((t for t in ticks if t.exchange_ts is not None), key=lambda t: t.exchange_ts))
+        self._validate_expectation(market_view, ticker, expectation)
+        ordered = market_view.get_ticks(ticker)
         if not ordered:
-            return FeatureSnapshot({}, (), AuthenticityState.UNKNOWN)
-        latest = ordered[-1]
-        eg = latest.gap_pct
-        iqr = None
-        if expected_gap_q25 is not None and expected_gap_q75 is not None:
-            iqr = expected_gap_q75 - expected_gap_q25
-        normalized_eg = None
-        if eg is not None and expected_gap_q50 is not None and iqr not in (None, 0):
-            normalized_eg = (eg - expected_gap_q50) / iqr
-        surprise_pct = None
-        if normalized_eg is not None and self.surprise is not None:
-            surprise_pct = self.surprise.percentile(ticker, normalized_eg, latest.exchange_ts)  # type: ignore[arg-type]
+            return FeatureSnapshot(
+                ticker,
+                market_view.trade_date,
+                market_view.as_of,
+                {},
+                (),
+                AuthenticityState.UNKNOWN,
+                expectation.distribution.status,
+                BenchmarkStatus.INSUFFICIENT,
+            )
 
-        pre20 = tuple(t for t in ordered if t.exchange_ts.time() < time(9, 20))  # type: ignore[union-attr]
-        post20 = tuple(t for t in ordered if t.exchange_ts.time() >= time(9, 20))  # type: ignore[union-attr]
-        pre20_gaps = [t.gap_pct for t in pre20 if t.gap_pct is not None]
-        post20_gaps = [t.gap_pct for t in post20 if t.gap_pct is not None]
+        latest = ordered[-1]
+        actual_gap = latest.gap_pct
+        distribution = expectation.distribution
+        expected_q50 = distribution.expected_gap_q50
+        iqr = distribution.expected_gap_q75 - distribution.expected_gap_q25
+        eg = None if actual_gap is None else actual_gap - expected_q50
+        normalized_eg = None
+        if eg is not None:
+            epsilon = self.thresholds.get("normalized_eg_epsilon")
+            normalized_eg = eg / max(abs(iqr), epsilon)
+        surprise_result = AuctionSurpriseResult(
+            None,
+            0,
+            distribution.minimum_sample_size,
+            BenchmarkStatus.INSUFFICIENT,
+        )
+        if actual_gap is not None and self.surprise is not None:
+            surprise_result = self.surprise.percentile(
+                market_view,
+                expectation.benchmark_key,
+                actual_gap,
+                expectation.information_available_at,
+            )
+
+        pre20 = tuple(tick for tick in ordered if tick.exchange_ts.time() < time(9, 20))  # type: ignore[union-attr]
+        post20 = tuple(tick for tick in ordered if tick.exchange_ts.time() >= time(9, 20))  # type: ignore[union-attr]
+        pre20_gaps = [tick.gap_pct for tick in pre20 if tick.gap_pct is not None]
+        post20_gaps = [tick.gap_pct for tick in post20 if tick.gap_pct is not None]
         pre20_peak = max(pre20_gaps) if pre20_gaps else None
         at20_tick = _value_at_or_before(ordered, time(9, 20))
         at20_gap = at20_tick.gap_pct if at20_tick is not None else None
         pre20_decay = None if pre20_peak is None or at20_gap is None else pre20_peak - at20_gap
         first_post_gap = post20_gaps[0] if post20_gaps else None
-        post20_delta = None if eg is None or first_post_gap is None else eg - first_post_gap
+        post20_delta = None if actual_gap is None or first_post_gap is None else actual_gap - first_post_gap
         post20_mdd = self._ordered_max_drawdown(post20_gaps)
         close_location = self._close_location(post20_gaps)
         recovery_ratio = self._recovery_ratio(post20_gaps)
@@ -85,22 +118,23 @@ class AuctionFeatureEngine:
 
         amount = latest.matched_amount
         volume = latest.matched_volume
+        historical_amounts = market_view.get_historical_features(ticker, "AuctionAmount")
+        historical_volumes = market_view.get_historical_features(ticker, "AuctionVolume")
+        peer_amounts = market_view.get_peer_latest_values(liquidity_peer_group, "matched_amount") if liquidity_peer_group else ()
+        peer_volumes = market_view.get_peer_latest_values(liquidity_peer_group, "matched_volume") if liquidity_peer_group else ()
+        theme_peer_gaps = market_view.get_peer_latest_values(theme_peer_group, "gap_pct") if theme_peer_group else ()
+        global_peer_gaps = market_view.get_peer_latest_values(global_peer_group, "gap_pct") if global_peer_group else ()
+        height_peer_gaps = market_view.get_peer_latest_values(height_peer_group, "gap_pct") if height_peer_group else ()
         amount_hist_pct = _percentile_rank(amount, historical_amounts)
         volume_hist_pct = _percentile_rank(volume, historical_volumes)
         amount_peer_pct = _percentile_rank(amount, peer_amounts)
         volume_peer_pct = _percentile_rank(volume, peer_volumes)
-        amount_ratio = None
-        if amount is not None and historical_amounts:
-            center = median(historical_amounts)
-            amount_ratio = amount / center if center else None
-        volume_ratio = None
-        if volume is not None and historical_volumes:
-            center = median(historical_volumes)
-            volume_ratio = volume / center if center else None
-        theme_rank = _percentile_rank(eg, theme_peer_gaps)
-        global_rank = _percentile_rank(eg, global_peer_gaps)
-        height_rank = _percentile_rank(eg, height_peer_gaps)
-        esr = None if pre20_peak in (None, 0) or eg is None else eg / pre20_peak
+        amount_ratio = self._ratio_to_median(amount, historical_amounts)
+        volume_ratio = self._ratio_to_median(volume, historical_volumes)
+        theme_rank = _percentile_rank(actual_gap, theme_peer_gaps)
+        global_rank = _percentile_rank(actual_gap, global_peer_gaps)
+        height_rank = _percentile_rank(actual_gap, height_peer_gaps)
+        esr = None if pre20_peak in (None, 0) or actual_gap is None else actual_gap / pre20_peak
 
         flags = []
         if pre20_decay is not None and pre20_decay >= self.thresholds.get("pre20_mirage_decay_pct"):
@@ -109,18 +143,35 @@ class AuctionFeatureEngine:
         if post20_mdd is not None and post20_mdd >= self.thresholds.get("post20_decay_pct") and decay_fraction >= self.thresholds.get("continuous_decay_fraction"):
             flags.append(FakeStrongFlag.POST20_CONTINUOUS_DECAY)
         liquidity_pct = self._mean_available(amount_hist_pct, volume_hist_pct)
-        if eg is not None and eg >= self.thresholds.get("price_strength_gap_pct") and liquidity_pct is not None and liquidity_pct < self.thresholds.get("liquidity_low_percentile"):
+        if actual_gap is not None and actual_gap >= self.thresholds.get("price_strength_gap_pct") and liquidity_pct is not None and liquidity_pct < self.thresholds.get("liquidity_low_percentile"):
             flags.append(FakeStrongFlag.PRICE_WITHOUT_LIQUIDITY)
         if not theme_validated and theme_rank is not None and theme_rank >= 1.0 - self.thresholds.get("isolated_strength_rank_pct"):
             flags.append(FakeStrongFlag.ISOLATED_STRENGTH)
         if late30_delta is not None and late30_delta >= self.thresholds.get("last_second_spike_pct") and liquidity_pct is not None and liquidity_pct < self.thresholds.get("liquidity_low_percentile"):
             flags.append(FakeStrongFlag.LAST_SECOND_SPIKE)
 
-        authenticity = self._authenticity(post20_mdd, recovery_ratio, flags)
+        relative_rank = self._mean_available(theme_rank, global_rank, height_rank)
+        funding_confirmed = self._funding_confirmed(post20)
+        phase = auction_phase_at(market_view.as_of)
+        authenticity = self._authenticity(
+            phase,
+            post20_mdd,
+            recovery_ratio,
+            late30_slope,
+            funding_confirmed,
+            relative_rank,
+            flags,
+        )
         values: Dict[str, Optional[float]] = {
+            "ActualAuctionGap": actual_gap,
+            "ExpectedGapQ50": expected_q50,
             "EG": eg,
             "NormalizedEG": normalized_eg,
-            "AuctionSurprisePercentile": surprise_pct,
+            "AuctionSurprisePercentile": surprise_result.percentile,
+            "BenchmarkEffectiveSampleSize": float(distribution.effective_sample_size),
+            "BenchmarkMinimumSampleSize": float(distribution.minimum_sample_size),
+            "SurpriseEffectiveSampleSize": float(surprise_result.effective_sample_size),
+            "SurpriseMinimumSampleSize": float(surprise_result.minimum_sample_size),
             "Pre20Peak": pre20_peak,
             "Pre20Decay": pre20_decay,
             "ESR": esr,
@@ -143,8 +194,32 @@ class AuctionFeatureEngine:
             "ThemePeerRank": theme_rank,
             "GlobalPeerRank": global_rank,
             "HeightPeerRank": height_rank,
+            "FundingConfirmed": 1.0 if funding_confirmed else 0.0,
         }
-        return FeatureSnapshot(values, tuple(flags), authenticity)
+        return FeatureSnapshot(
+            ticker,
+            market_view.trade_date,
+            market_view.as_of,
+            values,
+            tuple(flags),
+            authenticity,
+            distribution.status,
+            surprise_result.status,
+        )
+
+    @staticmethod
+    def _validate_expectation(
+        market_view: AsOfMarketView,
+        ticker: str,
+        expectation: PointInTimeExpectedAuction,
+    ) -> None:
+        if expectation.ticker != ticker or expectation.trade_date != market_view.trade_date:
+            raise ValueError("expectation ticker/trade_date must match the market view")
+        if expectation.generated_at > expectation.information_available_at:
+            raise ValueError("expectation cannot be generated after its information cutoff")
+        if not expectation.source_version:
+            raise ValueError("expectation source_version is required")
+        market_view.assert_timestamp_visible(expectation.information_available_at)
 
     @staticmethod
     def _ordered_max_drawdown(values: Sequence[float]) -> Optional[float]:
@@ -162,17 +237,35 @@ class AuctionFeatureEngine:
         if not values:
             return None
         low, high = min(values), max(values)
-        return 1.0 if high == low else (values[-1] - low) / (high - low)
+        return None if high == low else (values[-1] - low) / (high - low)
 
     @staticmethod
     def _recovery_ratio(values: Sequence[float]) -> Optional[float]:
-        if not values:
+        details = AuctionFeatureEngine._drawdown_details(values)
+        if details is None:
             return None
-        peak_index = max(range(len(values)), key=lambda index: values[index])
-        tail = values[peak_index:]
-        low = min(tail)
-        peak = values[peak_index]
-        return 1.0 if peak == low else (values[-1] - low) / (peak - low)
+        peak_index, trough_index, peak, trough = details
+        if trough_index >= len(values) - 1:
+            return 0.0
+        return max(0.0, min(1.0, (values[-1] - trough) / (peak - trough)))
+
+    @staticmethod
+    def _drawdown_details(values: Sequence[float]) -> Optional[Tuple[int, int, float, float]]:
+        if len(values) < 2:
+            return None
+        running_peak = values[0]
+        running_peak_index = 0
+        best = None
+        best_drawdown = 0.0
+        for index, value in enumerate(values[1:], start=1):
+            drawdown = running_peak - value
+            if drawdown > best_drawdown:
+                best_drawdown = drawdown
+                best = (running_peak_index, index, running_peak, value)
+            if value > running_peak:
+                running_peak = value
+                running_peak_index = index
+        return best
 
     @staticmethod
     def _late_delta_slope(ticks: Sequence[AuctionTick], seconds: int) -> Tuple[Optional[float], Optional[float]]:
@@ -180,7 +273,7 @@ class AuctionFeatureEngine:
         if latest.exchange_ts is None or latest.gap_pct is None:
             return None, None
         cutoff = latest.exchange_ts - timedelta(seconds=seconds)
-        candidates = [t for t in ticks if t.exchange_ts is not None and t.exchange_ts <= cutoff and t.gap_pct is not None]
+        candidates = [tick for tick in ticks if tick.exchange_ts is not None and tick.exchange_ts <= cutoff and tick.gap_pct is not None]
         if not candidates:
             return None, None
         start = candidates[-1]
@@ -197,15 +290,69 @@ class AuctionFeatureEngine:
 
     @staticmethod
     def _mean_available(*values: Optional[float]) -> Optional[float]:
-        available = [v for v in values if v is not None]
+        available = [value for value in values if value is not None]
         return sum(available) / len(available) if available else None
 
-    def _authenticity(self, drawdown, recovery, flags) -> AuthenticityState:
-        hard_fake = {FakeStrongFlag.POST20_CONTINUOUS_DECAY, FakeStrongFlag.PRICE_WITHOUT_LIQUIDITY, FakeStrongFlag.LAST_SECOND_SPIKE}
+    @staticmethod
+    def _ratio_to_median(value: Optional[float], history: Sequence[float]) -> Optional[float]:
+        if value is None or not history:
+            return None
+        center = median(history)
+        return value / center if center else None
+
+    @staticmethod
+    def _funding_confirmed(post20_ticks: Sequence[AuctionTick]) -> bool:
+        gaps = [tick.gap_pct for tick in post20_ticks]
+        if any(gap is None for gap in gaps):
+            return False
+        details = AuctionFeatureEngine._drawdown_details([float(gap) for gap in gaps])
+        if details is None:
+            return False
+        _, trough_index, _, _ = details
+        trough_tick = post20_ticks[trough_index]
+        latest = post20_ticks[-1]
+        amount_confirmed = (
+            trough_tick.matched_amount is not None
+            and latest.matched_amount is not None
+            and latest.matched_amount > trough_tick.matched_amount
+        )
+        volume_confirmed = (
+            trough_tick.matched_volume is not None
+            and latest.matched_volume is not None
+            and latest.matched_volume > trough_tick.matched_volume
+        )
+        return amount_confirmed and volume_confirmed
+
+    def _authenticity(
+        self,
+        phase: AuctionPhase,
+        drawdown: Optional[float],
+        recovery: Optional[float],
+        late_slope: Optional[float],
+        funding_confirmed: bool,
+        relative_rank: Optional[float],
+        flags: Sequence[FakeStrongFlag],
+    ) -> AuthenticityState:
+        if phase in (AuctionPhase.PRE_AUCTION, AuctionPhase.SCOUTING):
+            return AuthenticityState.UNKNOWN
+        hard_fake = {
+            FakeStrongFlag.POST20_CONTINUOUS_DECAY,
+            FakeStrongFlag.PRICE_WITHOUT_LIQUIDITY,
+            FakeStrongFlag.LAST_SECOND_SPIKE,
+        }
         if hard_fake.intersection(flags):
             return AuthenticityState.FAKE_STRONG
-        if drawdown is not None and recovery is not None and drawdown >= self.thresholds.get("healthy_min_drawdown_pct") and recovery >= self.thresholds.get("healthy_recovery_ratio"):
-            return AuthenticityState.HEALTHY_DISAGREEMENT
+        price_recovered = (
+            drawdown is not None
+            and recovery is not None
+            and drawdown >= self.thresholds.get("healthy_min_drawdown_pct")
+            and recovery >= self.thresholds.get("healthy_recovery_ratio")
+        )
+        if price_recovered:
+            relative_ok = relative_rank is not None and relative_rank >= self.thresholds.get("healthy_min_relative_rank")
+            if late_slope is not None and late_slope > 0 and funding_confirmed and relative_ok:
+                return AuthenticityState.HEALTHY_DISAGREEMENT
+            return AuthenticityState.HEALTHY_DISAGREEMENT_PENDING
         if FakeStrongFlag.PRE20_MIRAGE in flags or FakeStrongFlag.ISOLATED_STRENGTH in flags:
             return AuthenticityState.SUSPICIOUS
         return AuthenticityState.AUTHENTIC

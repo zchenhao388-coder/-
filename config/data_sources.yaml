@@ -2,6 +2,36 @@
   "active": "mock",
   "sources": {
     "mock": {"adapter": "adapters.mock.MockAdapter"},
-    "eastmoney_snapshot": {"adapter": "adapters.eastmoney.EastmoneySnapshotAdapter", "experimental": true}
+    "eastmoney_snapshot": {
+      "adapter": "adapters.eastmoney.EastmoneySnapshotAdapter",
+      "experimental": true,
+      "execution_enabled": false,
+      "allowed_uses": ["FIELD_PROBE", "RAW_CAPTURE", "SHADOW_RESEARCH"]
+    },
+    "mootdx_realtime": {
+      "adapter": "adapters.mootdx.MootdxRealtimeAdapter",
+      "role": "PRIMARY_PROBE",
+      "configured": false,
+      "experimental": true,
+      "execution_enabled": false,
+      "allowed_uses": ["FIELD_PROBE", "RAW_CAPTURE", "SHADOW_RESEARCH"],
+      "blocking_gaps": ["EXCHANGE_TIMESTAMP", "AUCTION_FIELD_SEMANTICS", "LICENSE", "SLA"]
+    },
+    "tencent_realtime": {
+      "adapter": "adapters.tencent.TencentRealtimeAdapter",
+      "role": "SECONDARY_PROBE",
+      "configured": false,
+      "experimental": true,
+      "execution_enabled": false,
+      "allowed_uses": ["FIELD_PROBE", "RAW_CAPTURE", "SHADOW_RESEARCH"],
+      "blocking_gaps": ["EXCHANGE_TIMESTAMP", "AUCTION_FIELD_SEMANTICS", "LICENSE", "SLA"]
+    },
+    "licensed_realtime_template": {
+      "adapter": "adapters.production.CertifiedRealtimeAdapter",
+      "configured": false,
+      "execution_enabled": false,
+      "requires": ["VENDOR_LICENSE", "SLA", "FIELD_SEMANTIC_ACCEPTANCE", "EXCHANGE_TIMESTAMP_EVIDENCE"],
+      "notes": "Template only; no licensed vendor credentials or acceptance evidence are committed."
+    }
   }
 }

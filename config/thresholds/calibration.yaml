@@ -1,0 +1,10 @@
+{
+  "thresholds": {
+    "minimum_train_sample": {"value": 100, "status": "SEED"},
+    "minimum_validation_sample": {"value": 20, "status": "SEED"},
+    "minimum_forward_sample": {"value": 20, "status": "SEED"},
+    "minimum_validation_average_return": {"value": 0.0, "status": "SEED"},
+    "minimum_forward_average_return": {"value": 0.0, "status": "SEED"},
+    "maximum_standardized_mean_drift": {"value": 0.5, "status": "SEED"}
+  }
+}

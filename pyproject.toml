@@ -1,8 +1,36 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "a-share-short-trade-system"
 version = "0.1.0"
 description = "Replayable A-share call-auction decision engine"
+readme = "README.md"
 requires-python = ">=3.9"
+dependencies = []
 
-[tool.unittest]
-start-directory = "tests"
+[project.optional-dependencies]
+dev = []
+data-sources = ["mootdx>=0.11.7,<0.12"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+  "adapters*",
+  "app*",
+  "auction*",
+  "backtest*",
+  "config*",
+  "domain*",
+  "execution*",
+  "expectation*",
+  "market*",
+  "monitoring*",
+  "replay*",
+  "storage*",
+]
+exclude = ["tests*", "sources*"]
+
+[tool.setuptools.package-data]
+config = ["*.yaml", "thresholds/*.yaml"]

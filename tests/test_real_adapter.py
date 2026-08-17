@@ -3,6 +3,10 @@ import unittest
 from datetime import datetime, timezone
 
 from adapters.eastmoney import EastmoneySnapshotAdapter
+from config.thresholds import ThresholdRegistry
+from domain.enums import DataQualityState
+from market.dqs import DataQualityService
+from tests.helpers import ts
 
 
 class RealAdapterContractTests(unittest.TestCase):
@@ -22,7 +26,14 @@ class RealAdapterContractTests(unittest.TestCase):
         self.assertEqual(tick.matched_amount, 397_586_127)
         self.assertIsNone(tick.unmatched_volume)
         self.assertIsNone(tick.orderbook)
+        self.assertIsNone(tick.exchange_ts)
+        self.assertIsNotNone(tick.provider_ts)
+        self.assertFalse(adapter.capability.supports_core)
         self.assertFalse(adapter.capability.auction_semantics_verified)
+        report = DataQualityService(ThresholdRegistry.load("config/thresholds/execution.yaml")).evaluate(
+            [tick], ts("09:25:00"),
+        )
+        self.assertEqual(report.state, DataQualityState.DEGRADED)
 
 
 if __name__ == "__main__":
