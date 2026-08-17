@@ -1,11 +1,12 @@
 import json
 import tempfile
+import time
 import unittest
 from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
 
-from adapters.mootdx import MootdxRealtimeAdapter
+from adapters.mootdx import MootdxPollTimeout, MootdxRealtimeAdapter
 from adapters.production import (
     DataSourceAcceptanceReport,
     DataSourceNotCertified,
@@ -112,6 +113,54 @@ class MootdxAdapterTests(unittest.TestCase):
         self.assertIsNone(tick.unmatched_side)
         self.assertIsNone(tick.unmatched_volume)
         self.assertFalse(tick.raw["auction_semantics_verified"])
+
+    def test_receive_timestamp_is_taken_after_provider_response(self):
+        current = [ts("09:24:59")]
+
+        class ClockAdvancingClient(FakeMootdxClient):
+            def quotes(self, symbol):
+                result = super().quotes(symbol)
+                current[0] = ts("09:25:02")
+                return result
+
+        client = ClockAdvancingClient((quote_row(),))
+        source = MootdxRealtimeAdapter(
+            lambda: client,
+            lambda: current[0],
+            timeout_seconds=0.2,
+        )
+        source.connect()
+        source.subscribe(("000001.SZ",))
+
+        tick = source.poll_once()[0]
+
+        self.assertEqual(tick.receive_ts, ts("09:25:02"))
+
+    def test_poll_timeout_is_bounded_and_does_not_spawn_overlapping_calls(self):
+        class BlockingClient(FakeMootdxClient):
+            def quotes(self, symbol):
+                self.quote_calls.append(tuple(symbol))
+                time.sleep(0.3)
+                return self.quote_rows
+
+        client = BlockingClient((quote_row(),))
+        source = MootdxRealtimeAdapter(
+            lambda: client,
+            timeout_seconds=0.03,
+        )
+        source.connect()
+        source.subscribe(("000001.SZ",))
+        started = time.monotonic()
+
+        with self.assertRaisesRegex(MootdxPollTimeout, "exceeded"):
+            source.poll_once()
+        first_elapsed = time.monotonic() - started
+        with self.assertRaisesRegex(MootdxPollTimeout, "still in flight"):
+            source.poll_once()
+
+        self.assertLess(first_elapsed, 0.2)
+        self.assertEqual(client.quote_calls, [("000001",)])
+        self.assertIn("MootdxPollTimeout", source.health()["last_error"])
 
     def test_missing_values_stay_none_instead_of_becoming_zero(self):
         source, _ = adapter((quote_row(price=None, last_close=None, vol=None, amount=None, bid1=None, ask1=None),))

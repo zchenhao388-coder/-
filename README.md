@@ -96,6 +96,23 @@ python -m pip install -e '.[data-sources]'
 python -m app.probe_sources 000001.SZ 600000.SH --samples 10 --interval-seconds 1 --transactions
 ```
 
+连续竞价采样应使用硬截止时间；到点后两路 worker 会自行停止并输出
+`PROBE_RUN_SUMMARY`，不需要外部 `SIGINT`：
+
+```bash
+python -m app.probe_sources 000001.SZ 600000.SH \
+  --end-time 09:25:05 \
+  --interval-seconds 1 \
+  --mootdx-timeout-seconds 2 \
+  --tencent-timeout-seconds 2
+```
+
+Mootdx 与腾讯由相互隔离的采集 worker 运行。每个 source 的
+`SOURCE_STARTED`、`HEARTBEAT`、`STALL`、`WATCHDOG_STALL`、`GAP`、
+`POLL_ERROR` 和 `SOURCE_STOPPED` 均以追加式 JSONL 保存在对应
+`storage/raw/<source>/<trade_date>/` 分区；这些控制事件不是市场行情，
+`exchange_ts=None` 且永不具备执行资格。
+
 该入口会把 source-native payload、canonical probe tick 和跨源验证结果以追加式 JSONL 保存到本地 `storage/`。运行数据由 `.gitignore` 排除，不应提交 Git。
 
 两个 Adapter 当前都只允许：

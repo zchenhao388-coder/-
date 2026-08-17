@@ -1,4 +1,6 @@
 from datetime import datetime
+from queue import Empty, Queue
+from threading import Lock, Thread
 from typing import Callable, Iterable, Mapping, Optional, Sequence, Tuple
 from zoneinfo import ZoneInfo
 
@@ -11,6 +13,10 @@ class MootdxUnavailable(RuntimeError):
     pass
 
 
+class MootdxPollTimeout(TimeoutError):
+    """Raised when a public Mootdx call exceeds the probe timeout."""
+
+
 class MootdxRealtimeAdapter(RealtimeAdapter):
     """Mootdx quote/transaction probe.
 
@@ -21,7 +27,7 @@ class MootdxRealtimeAdapter(RealtimeAdapter):
 
     SOURCE = "mootdx_realtime_probe"
     PROVENANCE = {
-        "receive_ts": "local timezone-aware receive clock",
+        "receive_ts": "local timezone-aware clock immediately after provider response completes",
         "provider_ts": "mootdx servertime/time combined with local Shanghai trade date",
         "exchange_ts": "N/A; provider time is not accepted as exchange-origin time",
         "virtual_price": "price; auction indicative-price semantics pending trading-day validation",
@@ -35,14 +41,20 @@ class MootdxRealtimeAdapter(RealtimeAdapter):
         self,
         client_factory: Optional[Callable[[], object]] = None,
         receive_clock: Optional[Callable[[], datetime]] = None,
+        timeout_seconds: float = 2.0,
     ):
+        if timeout_seconds <= 0:
+            raise ValueError("Mootdx timeout_seconds must be positive")
         self._client_factory = client_factory
         self._receive_clock = receive_clock or (lambda: datetime.now(ZoneInfo("Asia/Shanghai")))
+        self.timeout_seconds = float(timeout_seconds)
         self._client = None
         self._subscriptions = ()
         self._latest = {}
         self._last_receive_ts = None
         self._last_error = None
+        self._active_call = None
+        self._active_call_lock = Lock()
 
     @property
     def capability(self) -> DataCapability:
@@ -113,10 +125,12 @@ class MootdxRealtimeAdapter(RealtimeAdapter):
         client = self._require_connected()
         if not self._subscriptions:
             return ()
-        receive_ts = self._now()
         codes = [ticker.split(".")[0] for ticker in self._subscriptions]
         try:
-            payload = client.quotes(symbol=codes)
+            payload, receive_ts = self._provider_call(
+                "quotes",
+                lambda: client.quotes(symbol=codes),
+            )
             records = self._records(payload)
             ticks = tuple(self._map_quote(record, receive_ts) for record in records)
         except Exception as error:
@@ -131,8 +145,13 @@ class MootdxRealtimeAdapter(RealtimeAdapter):
     def capture_transactions(self, ticker: str, trade_date: str) -> Tuple[RawSourcePayload, ...]:
         client = self._require_connected()
         canonical = self._canonical_ticker(ticker)
-        receive_ts = self._now()
-        payload = client.transaction(symbol=canonical.split(".")[0], date=trade_date.replace("-", ""))
+        payload, receive_ts = self._provider_call(
+            "transaction",
+            lambda: client.transaction(
+                symbol=canonical.split(".")[0],
+                date=trade_date.replace("-", ""),
+            ),
+        )
         return tuple(
             RawSourcePayload(
                 source=self.SOURCE,
@@ -185,21 +204,44 @@ class MootdxRealtimeAdapter(RealtimeAdapter):
             yield tick
 
     def health(self) -> Mapping[str, object]:
+        with self._active_call_lock:
+            call_in_flight = self._active_call is not None and self._active_call.is_alive()
         return {
             "source": self.SOURCE,
             "connected": self._client is not None,
             "subscriptions": self._subscriptions,
             "last_receive_ts": self._last_receive_ts,
             "last_error": self._last_error,
+            "timeout_seconds": self.timeout_seconds,
+            "call_in_flight": call_in_flight,
             "execution_enabled": False,
         }
 
     def close(self) -> None:
         client = self._client
+        self._client = None
         close = getattr(client, "close", None)
         if callable(close):
-            close()
-        self._client = None
+            completed = Queue(maxsize=1)
+
+            def close_client() -> None:
+                try:
+                    close()
+                    completed.put_nowait(None)
+                except BaseException as error:  # pragma: no branch - stored for health only
+                    completed.put_nowait(error)
+
+            thread = Thread(target=close_client, name="mootdx-close", daemon=True)
+            thread.start()
+            try:
+                result = completed.get(timeout=self.timeout_seconds)
+            except Empty:
+                self._last_error = (
+                    f"MootdxPollTimeout: close exceeded {self.timeout_seconds:.3f}s"
+                )
+            else:
+                if isinstance(result, BaseException):
+                    self._last_error = f"{type(result).__name__}: {result}"
 
     def _map_quote(self, record: Mapping[str, object], receive_ts: datetime) -> AuctionTick:
         code = str(record.get("code") or "").zfill(6)
@@ -250,6 +292,61 @@ class MootdxRealtimeAdapter(RealtimeAdapter):
         if current.tzinfo is None or current.utcoffset() is None:
             raise ValueError("Mootdx receive clock must be timezone-aware")
         return current
+
+    def _provider_call(
+        self,
+        operation: str,
+        callback: Callable[[], object],
+    ) -> Tuple[object, datetime]:
+        """Bound a blocking Mootdx call without creating non-daemon shutdown debt.
+
+        Public TDX clients do not expose a reliable per-request timeout.  The
+        probe therefore runs at most one provider call in a daemon thread and
+        fails closed when it exceeds the configured deadline.  While that call
+        remains blocked, later polls fail immediately instead of creating an
+        unbounded thread backlog.
+        """
+        with self._active_call_lock:
+            active = self._active_call
+            if active is not None and active.is_alive():
+                raise MootdxPollTimeout(
+                    f"Mootdx {operation} skipped because the previous provider call is still in flight"
+                )
+            result_queue = Queue(maxsize=1)
+
+            def invoke() -> None:
+                try:
+                    result = callback()
+                    completed_at = self._now()
+                    result_queue.put_nowait((True, result, completed_at))
+                except BaseException as error:
+                    result_queue.put_nowait((False, error, None))
+
+            thread = Thread(
+                target=invoke,
+                name=f"mootdx-{operation}",
+                daemon=True,
+            )
+            self._active_call = thread
+            thread.start()
+        try:
+            succeeded, value, completed_at = result_queue.get(timeout=self.timeout_seconds)
+        except Empty as error:
+            raise MootdxPollTimeout(
+                f"Mootdx {operation} exceeded {self.timeout_seconds:.3f}s"
+            ) from error
+        finally:
+            if not thread.is_alive():
+                with self._active_call_lock:
+                    if self._active_call is thread:
+                        self._active_call = None
+        if not succeeded:
+            if not isinstance(value, BaseException):
+                raise RuntimeError("Mootdx provider call failed without an exception")
+            raise value
+        if not isinstance(completed_at, datetime):
+            raise RuntimeError("Mootdx provider call completed without a receive timestamp")
+        return value, completed_at
 
     def _require_connected(self):
         if self._client is None:
